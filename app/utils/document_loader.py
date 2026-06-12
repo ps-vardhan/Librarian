@@ -9,7 +9,7 @@ import chardet
 
 from langchain_core.documents import Document
 
-from app.config import known_source_ext, PDF_EXTRACT_IMAGES, CHUNK_OVERLAP, logger
+from app.config import known_source_ext, CHUNK_OVERLAP, logger
 from langchain_community.document_loaders import (
     TextLoader,
     PyPDFLoader,
@@ -30,6 +30,45 @@ from langchain_community.document_loaders import (
 _BINARY_FILE_EXTENSIONS = frozenset(
     {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "epub"}
 )
+
+
+class SafePyPDFLoader:
+    """
+    A wrapper around PyPDFLoader that handles image extraction failures gracefully.
+    Falls back to text-only extraction when image extraction fails.
+    """
+
+    def __init__(self, filepath: str, extract_images: bool = False):
+        self.filepath = filepath
+        self.extract_images = extract_images
+        self._temp_filepath = None  # For compatibility with cleanup function
+
+    def lazy_load(self) -> Iterator[Document]:
+        """Lazy load PDF documents with automatic fallback on image extraction errors."""
+        loader = PyPDFLoader(self.filepath, extract_images=self.extract_images)
+
+        if not self.extract_images:
+            # No image extraction: no fallback needed, stream directly
+            yield from loader.lazy_load()
+            return
+
+        try:
+            pages = list(loader.lazy_load())
+        except KeyError as e:
+            if "/Filter" in str(e):
+                logger.warning(
+                    f"PDF image extraction failed for {self.filepath}, falling back to text-only: {e}"
+                )
+                fallback_loader = PyPDFLoader(self.filepath, extract_images=False)
+                pages = list(fallback_loader.lazy_load())
+            else:
+                raise
+        yield from pages
+
+    def load(self) -> List[Document]:
+        """Load PDF documents with automatic fallback on image extraction errors."""
+        return list(self.lazy_load())
+
 
 
 def detect_file_encoding(filepath: str) -> str:
@@ -97,7 +136,7 @@ def get_loader(
     # File Content Type reference:
     # ref.: https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/MIME_types/Common_types
     if file_ext == "pdf" or file_content_type == "application/pdf":
-        loader = SafePyPDFLoader(filepath, extract_images=PDF_EXTRACT_IMAGES)
+        loader = SafePyPDFLoader(filepath, extract_images=False)
     elif file_ext == "csv" or file_content_type == "text/csv":
         # Detect encoding for CSV files
         encoding = detect_file_encoding(filepath)
@@ -183,7 +222,7 @@ def get_loader(
 
 def clean_text(text: str) -> str:
     """
-    Clean up text from PDF lopader
+    Clean up text from PDF loader
 
     :param text: The original text
     :return: Cleaned text
@@ -241,52 +280,3 @@ def process_documents(documents: List[Document]) -> str:
             processed_text += new_content
 
     return processed_text.strip()
-
-
-class SafePyPDFLoader:
-    """
-    A wrapper around PyPDFLoader that handles image extraction failures gracefully.
-    Falls back to text-only extraction when image extraction fails.
-
-    This is a workaround for issues with PyPDFLoader that can occur when extracting images
-    from PDFs, which can lead to KeyError exceptions if the PDF is malformed or has unsupported
-    image formats. This class attempts to load the PDF with image extraction enabled, and if it
-    fails due to a KeyError related to image filters, it falls back to loading the PDF
-    without image extraction.
-    ref.: https://github.com/langchain-ai/langchain/issues/26652
-    """
-
-    def __init__(self, filepath: str, extract_images: bool = False):
-        self.filepath = filepath
-        self.extract_images = extract_images
-        self._temp_filepath = None  # For compatibility with cleanup function
-
-    def lazy_load(self) -> Iterator[Document]:
-        """Lazy load PDF documents with automatic fallback on image extraction errors."""
-        loader = PyPDFLoader(self.filepath, extract_images=self.extract_images)
-
-        if not self.extract_images:
-            # No image extraction: no fallback needed, stream directly
-            yield from loader.lazy_load()
-            return
-
-        # extract_images=True: must collect eagerly so that a mid-stream
-        # KeyError doesn't leave already-yielded pages duplicated by the
-        # fallback (yield from + try/except would deliver partial + full).
-        try:
-            pages = list(loader.lazy_load())
-        except KeyError as e:
-            if "/Filter" in str(e):
-                logger.warning(
-                    f"PDF image extraction failed for {self.filepath}, falling back to text-only: {e}"
-                )
-                fallback_loader = PyPDFLoader(self.filepath, extract_images=False)
-                pages = list(fallback_loader.lazy_load())
-            else:
-                # Re-raise if it's a different error
-                raise
-        yield from pages
-
-    def load(self) -> List[Document]:
-        """Load PDF documents with automatic fallback on image extraction errors."""
-        return list(self.lazy_load())

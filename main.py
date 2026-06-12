@@ -16,14 +16,13 @@ from app.config import (
     RAG_PORT,
     CHUNK_SIZE,
     CHUNK_OVERLAP,
-    PDF_EXTRACT_IMAGES,
     VECTOR_DB_TYPE,
     LogMiddleware,
     logger,
     vector_store,
 )
 from app.middleware import security_middleware
-from app.routes import document_routes, pgvector_routes
+from app.routes import document_routes
 from app.services.database import PSQLDatabase, ensure_vector_indexes
 from app.services.vector_store.factory import close_vector_store_connections
 
@@ -62,7 +61,7 @@ async def lifespan(app: FastAPI):
     app.state.thread_pool.shutdown(wait=True)
     logger.info("Thread pool shutdown complete")
 
-    # Close vector store connections (MongoDB client / SQLAlchemy engine)
+    # Close vector store connections (SQLAlchemy engine)
     try:
         close_vector_store_connections(vector_store)
     except Exception as e:
@@ -86,12 +85,9 @@ app.middleware("http")(security_middleware)
 # Set state variables for use in routes
 app.state.CHUNK_SIZE = CHUNK_SIZE
 app.state.CHUNK_OVERLAP = CHUNK_OVERLAP
-app.state.PDF_EXTRACT_IMAGES = PDF_EXTRACT_IMAGES
 
 # Include routers
 app.include_router(document_routes.router)
-if debug_mode:
-    app.include_router(router=pgvector_routes.router)
 
 
 @app.exception_handler(RequestValidationError)
