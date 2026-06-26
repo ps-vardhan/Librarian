@@ -1,4 +1,4 @@
-# app/routes/document_routes.py
+# ID-Rag/app/routes/document_routes.py
 import os
 import uuid
 from pathlib import Path
@@ -8,7 +8,6 @@ import aiofiles
 import aiofiles.os
 
 from typing import List, Iterable, Optional, TYPE_CHECKING
-from concurrent.futures import ThreadPoolExecutor
 from fastapi import (
     APIRouter,
     Request,
@@ -19,6 +18,7 @@ from fastapi import (
     Body,
     Query,
     status,
+    BackgroundTasks,
 )
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -98,9 +98,6 @@ async def save_upload_file_async(file: UploadFile, temp_file_path: str) -> None:
         )
 
 
-
-
-
 def validate_file_path(base_dir: str, file_path: str) -> Optional[str]:
     """Validate that file_path resolves within base_dir. Returns resolved absolute path or None."""
     if not file_path or not file_path.strip() or "\x00" in file_path:
@@ -112,7 +109,6 @@ def validate_file_path(base_dir: str, file_path: str) -> Optional[str]:
         return str(requested)
     except (ValueError, RuntimeError, TypeError, OSError):
         return None
-
 
 
 def _make_unique_temp_path(user_id: str, filename: str) -> Optional[str]:
@@ -178,13 +174,50 @@ async def cleanup_temp_file_async(file_path: str) -> None:
         )
 
 
-@router.get("/ids")
-async def get_all_ids(request: Request):
+async def process_and_store_file_background(
+    filename: str,
+    content_type: str,
+    file_path: str,
+    file_id: str,
+    user_id: str,
+    clean_content: bool,
+    executor,
+) -> None:
     try:
+        data, known_type, file_ext = await load_file_content(
+            filename,
+            content_type,
+            file_path,
+            executor,
+        )
+
+        await store_data_in_vector_db(
+            data=data,
+            file_id=file_id,
+            user_id=user_id,
+            clean_content=clean_content,
+            executor=executor,
+        )
+        logger.info(f"Background ingestion completed successfully for file: {filename}")
+    except Exception as e:
+        logger.error(
+            "Background ingestion failed | File: %s | Error: %s | Traceback: %s",
+            filename,
+            str(e),
+            traceback.format_exc(),
+        )
+    finally:
+        await cleanup_temp_file_async(file_path)
+
+
+@router.get("/ids")
+async def get_all_ids(request: Request, entity_id: str = Query(None)):
+    try:
+        user_authorized = get_user_id(request, entity_id)
         if isinstance(vector_store, AsyncPgVector):
-            ids = await vector_store.get_all_ids(executor=request.app.state.thread_pool)
+            ids = await vector_store.get_all_ids(user_id=user_authorized, executor=request.app.state.thread_pool)
         else:
-            ids = vector_store.get_all_ids()
+            ids = vector_store.get_all_ids(user_id=user_authorized)
         return list(set(ids))
     except HTTPException as http_exc:
         logger.error(
@@ -222,6 +255,9 @@ async def health_check():
 @router.get("/documents", response_model=list[DocumentResponse])
 async def get_documents_by_ids(request: Request, ids: list[str] = Query(...)):
     try:
+        user_authorized = get_user_id(request)
+        allowed_users = {user_authorized, "public"}
+
         if isinstance(vector_store, AsyncPgVector):
             existing_ids = await vector_store.get_filtered_ids(
                 ids, executor=request.app.state.thread_pool
@@ -235,6 +271,11 @@ async def get_documents_by_ids(request: Request, ids: list[str] = Query(...)):
 
         if not all(id in existing_ids for id in ids):
             raise HTTPException(status_code=404, detail="One or more IDs not found")
+
+        # Security check: verify ownership of each doc
+        for doc in documents:
+            if doc.metadata.get("user_id") not in allowed_users:
+                raise HTTPException(status_code=403, detail="Permission denied to access these documents")
 
         if not documents:
             raise HTTPException(
@@ -260,21 +301,36 @@ async def get_documents_by_ids(request: Request, ids: list[str] = Query(...)):
 
 
 @router.delete("/documents")
-async def delete_documents(request: Request, document_ids: List[str] = Body(...)):
+async def delete_documents(request: Request, document_ids: List[str] = Body(...), entity_id: str = Query(None)):
     try:
+        user_authorized = get_user_id(request, entity_id)
+        allowed_users = {user_authorized, "public"}
+
         if isinstance(vector_store, AsyncPgVector):
             existing_ids = await vector_store.get_filtered_ids(
                 document_ids, executor=request.app.state.thread_pool
             )
+            documents = await vector_store.get_documents_by_ids(
+                document_ids, executor=request.app.state.thread_pool
+            )
+        else:
+            existing_ids = vector_store.get_filtered_ids(document_ids)
+            documents = vector_store.get_documents_by_ids(document_ids)
+
+        if not all(id in existing_ids for id in document_ids):
+            raise HTTPException(status_code=404, detail="One or more IDs not found")
+
+        # Security check: verify ownership before deletion
+        for doc in documents:
+            if doc.metadata.get("user_id") not in allowed_users:
+                raise HTTPException(status_code=403, detail="Permission denied to delete these documents")
+
+        if isinstance(vector_store, AsyncPgVector):
             await vector_store.delete(
                 ids=document_ids, executor=request.app.state.thread_pool
             )
         else:
-            existing_ids = vector_store.get_filtered_ids(document_ids)
             vector_store.delete(ids=document_ids)
-
-        if not all(id in existing_ids for id in document_ids):
-            raise HTTPException(status_code=404, detail="One or more IDs not found")
 
         file_count = len(document_ids)
         return {
@@ -307,61 +363,77 @@ async def query_embeddings_by_file_id(
     body: QueryRequestBody,
     request: Request,
 ):
-    if not hasattr(request.state, "user"):
-        user_authorized = body.entity_id if body.entity_id else "public"
+    if hasattr(request.state, "user"):
+        allowed_users = [request.state.user.get("id"), "public"]
+        if body.entity_id:
+            if body.entity_id in allowed_users:
+                allowed_users = [body.entity_id]
+            else:
+                allowed_users = ["public"]
     else:
-        user_authorized = (
-            body.entity_id if body.entity_id else request.state.user.get("id")
-        )
-
-    authorized_documents = []
+        allowed_users = [body.entity_id] if body.entity_id else ["public"]
 
     try:
         embedding = get_cached_query_embedding(body.query)
+
+        # SQL-level filter: file_id matches AND user_id matches allowed user(s)
+        db_filter = {
+            "file_id": {"$eq": body.file_id},
+            "user_id": {"$in": allowed_users}
+        }
 
         if isinstance(vector_store, AsyncPgVector):
             documents = await vector_store.asimilarity_search_with_score_by_vector(
                 embedding,
                 k=body.k,
-                filter={"file_id": {"$eq": body.file_id}},
+                filter=db_filter,
                 executor=request.app.state.thread_pool,
             )
         else:
             documents = vector_store.similarity_search_with_score_by_vector(
-                embedding, k=body.k, filter={"file_id": {"$eq": body.file_id}}
+                embedding, k=body.k, filter=db_filter
             )
 
         documents = _apply_distance_threshold(documents)
 
+        if not body.generate_answer:
+            return documents
+
+        answer = None
         if not documents:
-            return authorized_documents
-
-        document, score = documents[0]
-        doc_metadata = document.metadata
-        doc_user_id = doc_metadata.get("user_id")
-
-        if doc_user_id is None or doc_user_id == user_authorized:
-            authorized_documents = documents
+            answer = "No relevant document chunks found to answer your query."
         else:
-            if body.entity_id and hasattr(request.state, "user"):
-                user_authorized = request.state.user.get("id")
-                if doc_user_id == user_authorized:
-                    authorized_documents = documents
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                from langchain_core.messages import HumanMessage
+                from app.config import RAG_GOOGLE_API_KEY, GOOGLE_API_KEY
+                
+                api_key = RAG_GOOGLE_API_KEY or GOOGLE_API_KEY
+                if not api_key:
+                    answer = "Error: Google Gemini API key is missing. Please add it to your .env file."
                 else:
-                    if body.entity_id == doc_user_id:
-                        logger.warning(
-                            f"Entity ID {body.entity_id} matches document user_id but user {user_authorized} is not authorized"
-                        )
-                    else:
-                        logger.warning(
-                            f"Access denied for both entity ID {body.entity_id} and user {user_authorized} to document with user_id {doc_user_id}"
-                        )
-            else:
-                logger.warning(
-                    f"Unauthorized access attempt by user {user_authorized} to a document with user_id {doc_user_id}"
-                )
+                    llm = ChatGoogleGenerativeAI(
+                        model="gemini-1.5-flash",
+                        google_api_key=api_key,
+                    )
+                    context_text = "\n---\n".join([doc.page_content for doc, _ in documents])
+                    prompt = (
+                        "You are a helpful assistant that answers questions based strictly on the provided context.\n"
+                        "If the context does not contain enough information to answer the question, state that you do not know.\n\n"
+                        f"Context:\n{context_text}\n\n"
+                        f"Question: {body.query}\n\n"
+                        "Answer:"
+                    )
+                    response = await llm.ainvoke([HumanMessage(content=prompt)])
+                    answer = response.content
+            except Exception as e:
+                logger.error(f"Error generating AI answer: {e}")
+                answer = f"Error generating AI answer: {str(e)}"
 
-        return authorized_documents
+        return {
+            "answer": answer,
+            "documents": documents
+        }
 
     except HTTPException as http_exc:
         logger.error(
@@ -395,10 +467,25 @@ def _prepare_documents_sync(
     Synchronous document preparation - runs in executor to avoid blocking event loop.
     Handles text splitting, cleaning, and metadata preparation.
     """
+    processed_data = []
+    if not clean_content:
+        for doc in data:
+            if isinstance(doc.page_content, str):
+                lines = doc.page_content.split("\n")
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped:
+                        meta = (doc.metadata or {}).copy()
+                        processed_data.append(Document(page_content=stripped, metadata=meta))
+            else:
+                processed_data.append(doc)
+    else:
+        processed_data = list(data)
+
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
     )
-    documents = text_splitter.split_documents(data)
+    documents = text_splitter.split_documents(processed_data)
 
     if clean_content:
         for doc in documents:
@@ -531,14 +618,11 @@ async def embed_local_file(
 @router.post("/embed")
 async def embed_file(
     request: Request,
+    background_tasks: BackgroundTasks,
     file_id: str = Form(...),
     file: UploadFile = File(...),
     entity_id: str = Form(None),
 ):
-    response_status = True
-    response_message = "File processed successfully."
-    known_type = None
-
     user_id = get_user_id(request, entity_id)
     validated_file_path = _make_unique_temp_path(user_id, file.filename)
 
@@ -552,66 +636,37 @@ async def embed_file(
     try:
         os.makedirs(os.path.dirname(validated_file_path), exist_ok=True)
         await save_upload_file_async(file, validated_file_path)
-        data, known_type, file_ext = await load_file_content(
+        
+        file_ext = file.filename.split(".")[-1].lower()
+
+        background_tasks.add_task(
+            process_and_store_file_background,
             file.filename,
             file.content_type,
             validated_file_path,
+            file_id,
+            user_id,
+            file_ext == "pdf",
             request.app.state.thread_pool,
         )
 
-        result = await store_data_in_vector_db(
-            data=data,
-            file_id=file_id,
-            user_id=user_id,
-            clean_content=file_ext == "pdf",
-            executor=request.app.state.thread_pool,
-        )
-
-        if not result:
-            response_status = False
-            response_message = "Failed to process/store the file data."
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to process/store the file data.",
-            )
-        elif "error" in result:
-            response_status = False
-            response_message = result["error"]
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result["error"],
-            )
-    except HTTPException as http_exc:
-        response_status = False
-        response_message = f"HTTP Exception: {http_exc.detail}"
-        logger.error(
-            "HTTP Exception in embed_file | Status: %d | Detail: %s",
-            http_exc.status_code,
-            http_exc.detail,
-        )
-        raise http_exc
+        return {
+            "status": True,
+            "message": "File uploaded successfully. Ingestion started in background.",
+            "file_id": file_id,
+            "filename": file.filename,
+            "known_type": None,
+        }
     except Exception as e:
-        response_status = False
-        response_message = f"Error during file processing: {str(e)}"
         logger.error(
-            "Error during file processing: %s\nTraceback: %s",
+            "Error starting file processing: %s\nTraceback: %s",
             str(e),
             traceback.format_exc(),
         )
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error during file processing: {str(e)}",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error starting file processing: {str(e)}",
         )
-    finally:
-        await cleanup_temp_file_async(validated_file_path)
-
-    return {
-        "status": response_status,
-        "message": response_message,
-        "file_id": file_id,
-        "filename": file.filename,
-        "known_type": known_type,
-    }
 
 
 @router.get("/documents/{id}/context")
@@ -663,6 +718,7 @@ async def load_document_context(request: Request, id: str):
 @router.post("/embed-upload")
 async def embed_file_upload(
     request: Request,
+    background_tasks: BackgroundTasks,
     file_id: str = Form(...),
     uploaded_file: UploadFile = File(...),
     entity_id: str = Form(None),
@@ -682,33 +738,27 @@ async def embed_file_upload(
     try:
         os.makedirs(os.path.dirname(validated_temp_file_path), exist_ok=True)
         await save_upload_file_async(uploaded_file, validated_temp_file_path)
-        data, known_type, file_ext = await load_file_content(
+        
+        file_ext = uploaded_file.filename.split(".")[-1].lower()
+
+        background_tasks.add_task(
+            process_and_store_file_background,
             uploaded_file.filename,
             uploaded_file.content_type,
             validated_temp_file_path,
+            file_id,
+            user_id,
+            file_ext == "pdf",
             request.app.state.thread_pool,
         )
 
-        result = await store_data_in_vector_db(
-            data,
-            file_id,
-            user_id,
-            clean_content=file_ext == "pdf",
-            executor=request.app.state.thread_pool,
-        )
-
-        if not result or "error" in result:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("error", "Failed to process/store the file data."),
-            )
-    except HTTPException as http_exc:
-        logger.error(
-            "HTTP Exception in embed_file_upload | Status: %d | Detail: %s",
-            http_exc.status_code,
-            http_exc.detail,
-        )
-        raise http_exc
+        return {
+            "status": True,
+            "message": "File processed successfully. Ingestion started in background.",
+            "file_id": file_id,
+            "filename": uploaded_file.filename,
+            "known_type": None,
+        }
     except Exception as e:
         logger.error(
             "Error during file processing | File: %s | Error: %s | Traceback: %s",
@@ -720,43 +770,85 @@ async def embed_file_upload(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Error during file processing: {str(e)}",
         )
-    finally:
-        await cleanup_temp_file_async(validated_temp_file_path)
-
-    return {
-        "status": True,
-        "message": "File processed successfully.",
-        "file_id": file_id,
-        "filename": uploaded_file.filename,
-        "known_type": known_type,
-    }
 
 
 @router.post("/query_multiple")
 async def query_embeddings_by_file_ids(request: Request, body: QueryMultipleBody):
+    if hasattr(request.state, "user"):
+        allowed_users = [request.state.user.get("id"), "public"]
+        if body.entity_id:
+            if body.entity_id in allowed_users:
+                allowed_users = [body.entity_id]
+            else:
+                allowed_users = ["public"]
+    else:
+        allowed_users = [body.entity_id] if body.entity_id else ["public"]
+
     try:
         embedding = get_cached_query_embedding(body.query)
+
+        # SQL-level filter: file_id matches list AND user_id matches allowed user(s)
+        db_filter = {
+            "file_id": {"$in": body.file_ids},
+            "user_id": {"$in": allowed_users}
+        }
 
         if isinstance(vector_store, AsyncPgVector):
             documents = await vector_store.asimilarity_search_with_score_by_vector(
                 embedding,
                 k=body.k,
-                filter={"file_id": {"$in": body.file_ids}},
+                filter=db_filter,
                 executor=request.app.state.thread_pool,
             )
         else:
             documents = vector_store.similarity_search_with_score_by_vector(
-                embedding, k=body.k, filter={"file_id": {"$in": body.file_ids}}
+                embedding, k=body.k, filter=db_filter
             )
 
         documents = _apply_distance_threshold(documents)
 
-        if not documents:
-            raise HTTPException(
-                status_code=404, detail="No documents found for the given query"
-            )
+        if not body.generate_answer:
+            if not documents:
+                raise HTTPException(
+                    status_code=404, detail="No documents found for the given query"
+                )
+            return documents
 
-        return documents
+        answer = None
+        if not documents:
+            answer = "No relevant document chunks found to answer your query."
+        else:
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                from langchain_core.messages import HumanMessage
+                from app.config import RAG_GOOGLE_API_KEY, GOOGLE_API_KEY
+                
+                api_key = RAG_GOOGLE_API_KEY or GOOGLE_API_KEY
+                if not api_key:
+                    answer = "Error: Google Gemini API key is missing. Please add it to your .env file."
+                else:
+                    llm = ChatGoogleGenerativeAI(
+                        model="gemini-1.5-flash",
+                        google_api_key=api_key,
+                    )
+                    context_text = "\n---\n".join([doc.page_content for doc, _ in documents])
+                    prompt = (
+                        "You are a helpful assistant that answers questions based strictly on the provided context.\n"
+                        "If the context does not contain enough information to answer the question, state that you do not know.\n\n"
+                        f"Context:\n{context_text}\n\n"
+                        f"Question: {body.query}\n\n"
+                        "Answer:"
+                    )
+                    response = await llm.ainvoke([HumanMessage(content=prompt)])
+                    answer = response.content
+            except Exception as e:
+                logger.error(f"Error generating AI answer: {e}")
+                answer = f"Error generating AI answer: {str(e)}"
+
+        return {
+            "answer": answer,
+            "documents": documents
+        }
     except HTTPException as http_exc:
         logger.error(
             "HTTP Exception in query_embeddings_by_file_ids | Status: %d | Detail: %s",
