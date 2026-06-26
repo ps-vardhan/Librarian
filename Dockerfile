@@ -2,7 +2,7 @@ FROM python:3.10 AS main
 
 WORKDIR /app
 
-# Install pandoc and netcat
+# Install pandoc and other system requirements for document parsing
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
     pandoc \
@@ -14,7 +14,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download standard NLTK data, to prevent unstructured from downloading packages at runtime
+# Download standard NLTK data to prevent unstructured from downloading packages at runtime
 RUN python -m nltk.downloader -d /app/nltk_data punkt_tab averaged_perceptron_tagger averaged_perceptron_tagger_eng
 ENV NLTK_DATA=/app/nltk_data
 
