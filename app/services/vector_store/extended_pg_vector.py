@@ -1,15 +1,14 @@
+# ID-Rag/app/services/vector_store/extended_pg_vector.py
 import os
 import time
 import logging
 from typing import Optional, Any, Dict, List, Union
-from sqlalchemy import event
-from sqlalchemy import delete
+from sqlalchemy import event, delete, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import Engine
 from langchain_core.documents import Document
 from langchain_community.vectorstores.pgvector import (
     PGVector,
-    COMPARISONS_TO_NATIVE,
     SUPPORTED_OPERATORS,
 )
 
@@ -32,7 +31,6 @@ class ExtendedPgVector(PGVector):
         if isinstance(parameters, dict):
             sanitized = {}
             for key, value in parameters.items():
-                # Check if the key contains 'embedding' or if the value looks like an embedding vector
                 if "embedding" in str(key).lower() or (
                     isinstance(value, (list, tuple))
                     and len(value) > 10
@@ -50,7 +48,6 @@ class ExtendedPgVector(PGVector):
             return sanitized
         elif isinstance(parameters, (list, tuple)):
             sanitized = []
-            # Check if this is a list of embeddings
             if len(parameters) > 0 and all(
                 isinstance(item, (list, tuple))
                 and len(item) > 10
@@ -80,19 +77,16 @@ class ExtendedPgVector(PGVector):
 
     def setup_query_logging(self):
         """Enable query logging for this vector store only if DEBUG_PGVECTOR_QUERIES is set"""
-        # Only setup logging if the environment variable is set to a truthy value
         debug_queries = os.getenv("DEBUG_PGVECTOR_QUERIES", "").lower()
         if debug_queries not in ["true", "1", "yes", "on"]:
             return
 
-        # Only setup once per class
         if ExtendedPgVector._query_logging_setup:
             return
 
         logger = logging.getLogger("pgvector.queries")
         logger.setLevel(logging.INFO)
 
-        # Create handler if it doesn't exist
         if not logger.handlers:
             handler = logging.StreamHandler()
             formatter = logging.Formatter("%(asctime)s - PGVECTOR QUERY - %(message)s")
@@ -125,14 +119,8 @@ class ExtendedPgVector(PGVector):
     def _handle_field_filter(self, field: str, value: Any) -> Any:
         """Override LangChain's filter to avoid jsonb_path_match() for equality ops.
 
-        LangChain's default _handle_field_filter uses func.jsonb_path_match() for
-        $eq/$ne/$lt/$gt etc. That function-call predicate cannot use B-tree expression
-        indexes like (cmetadata->>'file_id') or GIN jsonb_path_ops indexes, forcing
-        PostgreSQL into sequential scans on large tables.
-
         This override rewrites $eq and $ne to use the ->>' astext operator instead,
         producing WHERE (cmetadata->>'field') = 'value' which hits expression indexes.
-        All other operators ($lt, $gt, $in, $between, etc.) delegate to the parent.
         """
         if not isinstance(field, str):
             raise ValueError(
@@ -166,15 +154,27 @@ class ExtendedPgVector(PGVector):
             filter_value = value
 
         if operator == "$eq":
-            return self.EmbeddingStore.cmetadata[field].astext == str(filter_value)
+            return self.EmbeddingStore.cmetadata.contains({field: filter_value})
         elif operator == "$ne":
-            return self.EmbeddingStore.cmetadata[field].astext != str(filter_value)
+            return ~self.EmbeddingStore.cmetadata.contains({field: filter_value})
+        elif operator == "$in":
+            if not isinstance(filter_value, list):
+                raise ValueError(f"Operator $in expects a list but got: {type(filter_value)}")
+            return or_(*(self.EmbeddingStore.cmetadata.contains({field: v}) for v in filter_value))
 
         return super()._handle_field_filter(field, value)
 
-    def get_all_ids(self) -> list[str]:
+    def get_all_ids(self, user_id: str = None) -> list[str]:
         with Session(self._bind) as session:
-            results = session.query(self.EmbeddingStore.custom_id).all()
+            query = session.query(self.EmbeddingStore.custom_id)
+            if user_id:
+                query = query.filter(
+                    or_(
+                        self.EmbeddingStore.cmetadata.contains({"user_id": user_id}),
+                        self.EmbeddingStore.cmetadata.contains({"user_id": "public"})
+                    )
+                )
+            results = query.all()
             return [result[0] for result in results if result[0] is not None]
 
     def get_filtered_ids(self, ids: list[str]) -> list[str]:
@@ -204,8 +204,7 @@ class ExtendedPgVector(PGVector):
         with Session(self._bind) as session:
             if ids is not None:
                 self.logger.debug(
-                    "Trying to delete vectors by ids (represented by the model "
-                    "using the custom ids field)"
+                    "Deleting vectors by custom ids field"
                 )
                 stmt = delete(self.EmbeddingStore)
                 if collection_only:
