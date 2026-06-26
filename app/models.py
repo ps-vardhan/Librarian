@@ -1,4 +1,4 @@
-# app/models.py
+# ID-Rag/app/models.py
 import hashlib
 from enum import Enum
 from pydantic import BaseModel
@@ -31,6 +31,7 @@ class QueryRequestBody(BaseModel):
     file_id: str
     k: int = 4
     entity_id: Optional[str] = None
+    generate_answer: Optional[bool] = False
 
 
 class CleanupMethod(str, Enum):
@@ -42,3 +43,5 @@ class QueryMultipleBody(BaseModel):
     query: str
     file_ids: List[str]
     k: int = 4
+    entity_id: Optional[str] = None
+    generate_answer: Optional[bool] = False
