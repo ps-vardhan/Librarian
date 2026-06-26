@@ -1,0 +1,1850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Librarian - Interactive RAG UI</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --card-border: rgba(255, 255, 255, 0.08);
+            --card-border-hover: rgba(99, 102, 241, 0.3);
+            --text-primary: #f3f4f6;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+            --primary: #6366f1;
+            --primary-glow: rgba(99, 102, 241, 0.15);
+            --secondary: #a855f7;
+            --secondary-glow: rgba(168, 85, 247, 0.15);
+            --accent: #ec4899;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --font-display: 'Outfit', sans-serif;
+            --font-body: 'Plus Jakarta Sans', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --sidebar-width: 260px;
+            --transition-speed: 0.25s;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            scrollbar-width: thin;
+            scrollbar-color: var(--card-border) var(--bg-color);
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary);
+        }
+
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 45%);
+            background-attachment: fixed;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: rgba(17, 24, 39, 0.85);
+            border-right: 1px solid var(--card-border);
+            backdrop-filter: blur(20px);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            z-index: 100;
+        }
+
+        .brand {
+            padding: 2rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .brand-logo {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-display);
+            font-weight: 800;
+            font-size: 1.25rem;
+            color: white;
+            box-shadow: 0 0 15px var(--primary-glow);
+        }
+
+        .brand-name {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 1.35rem;
+            background: linear-gradient(to right, #ffffff, #d1d5db);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            padding: 1rem 0.75rem;
+            flex: 1;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+            padding: 0.85rem 1rem;
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: 10px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-speed) cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid transparent;
+        }
+
+        .nav-item:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.03);
+            border-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .nav-item.active {
+            color: white;
+            background: linear-gradient(135deg, var(--primary-glow), rgba(168, 85, 247, 0.05));
+            border-color: var(--card-border-hover);
+            box-shadow: inset 0 0 12px rgba(99, 102, 241, 0.05);
+        }
+
+        .nav-item svg {
+            width: 20px;
+            height: 20px;
+            stroke: currentColor;
+            fill: none;
+            stroke-width: 2;
+        }
+
+        .sidebar-footer {
+            padding: 1.5rem 1rem;
+            border-top: 1px solid var(--card-border);
+        }
+
+        /* Main Content */
+        .main-container {
+            margin-left: var(--sidebar-width);
+            flex: 1;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 2rem;
+            max-width: 1400px;
+            width: calc(100% - var(--sidebar-width));
+        }
+
+        /* Header */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .page-title h1 {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 2rem;
+            margin-bottom: 0.25rem;
+            background: linear-gradient(to right, #ffffff, #e5e7eb);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .page-title p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .status-badge {
+            background: rgba(17, 24, 39, 0.6);
+            border: 1px solid var(--card-border);
+            padding: 0.5rem 1rem;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 500;
+            backdrop-filter: blur(10px);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            background-color: var(--success);
+            box-shadow: 0 0 10px var(--success);
+        }
+
+        /* Tab Panels */
+        .tab-panel {
+            display: none;
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Grid Layouts */
+        .grid-sidebar-main {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 2rem;
+        }
+
+        /* Cards & Glassmorphism Panels */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 1.75rem;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            transition: border-color var(--transition-speed);
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .card-title {
+            font-family: var(--font-display);
+            font-weight: 600;
+            font-size: 1.25rem;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Form elements */
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        .form-group label {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.5rem;
+        }
+
+        .input-control {
+            width: 100%;
+            background: rgba(17, 24, 39, 0.6);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+            color: white;
+            font-family: var(--font-body);
+            font-size: 0.95rem;
+            transition: all var(--transition-speed);
+        }
+
+        .input-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+            background: rgba(17, 24, 39, 0.9);
+        }
+
+        textarea.input-control {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .slider-container input[type="range"] {
+            flex: 1;
+            accent-color: var(--primary);
+            background: var(--card-border);
+            height: 6px;
+            border-radius: 99px;
+            cursor: pointer;
+        }
+
+        .slider-value {
+            font-family: var(--font-mono);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            min-width: 32px;
+            text-align: center;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.5rem;
+            border-radius: 10px;
+            font-family: var(--font-body);
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition-speed);
+            border: 1px solid transparent;
+            text-decoration: none;
+            width: 100%;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.25);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35);
+        }
+
+        .btn-primary:active {
+            transform: translateY(1px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border-color: var(--card-border);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        /* File Upload Zone */
+        .upload-zone {
+            border: 2px dashed var(--card-border);
+            border-radius: 12px;
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all var(--transition-speed);
+            background: rgba(255, 255, 255, 0.01);
+            position: relative;
+        }
+
+        .upload-zone:hover, .upload-zone.dragover {
+            border-color: var(--primary);
+            background: rgba(99, 102, 241, 0.03);
+        }
+
+        .upload-zone svg {
+            width: 48px;
+            height: 48px;
+            stroke: var(--text-secondary);
+            fill: none;
+            stroke-width: 1.5;
+            margin-bottom: 1rem;
+            transition: stroke var(--transition-speed);
+        }
+
+        .upload-zone:hover svg, .upload-zone.dragover svg {
+            stroke: var(--primary);
+        }
+
+        .upload-zone input[type="file"] {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        .upload-zone p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .upload-zone span {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .selected-file-badge {
+            margin-top: 1rem;
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid var(--primary-glow);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.85rem;
+        }
+
+        /* Results / List View */
+        .results-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            max-height: 650px;
+            overflow-y: auto;
+            padding-right: 0.25rem;
+        }
+
+        .placeholder-text {
+            color: var(--text-muted);
+            text-align: center;
+            padding: 4rem 1rem;
+            font-size: 0.95rem;
+        }
+
+        .result-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: all var(--transition-speed);
+        }
+
+        .result-item:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            font-size: 0.85rem;
+        }
+
+        .result-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .result-badge {
+            background: rgba(99, 102, 241, 0.15);
+            color: #a5b4fc;
+            padding: 0.25rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+
+        .result-score {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .result-content {
+            font-size: 0.95rem;
+            line-height: 1.6;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+        }
+
+        /* Document Manager Items */
+        .doc-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1rem 1.25rem;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            margin-bottom: 0.75rem;
+            transition: all var(--transition-speed);
+        }
+
+        .doc-item:hover {
+            border-color: var(--card-border-hover);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .doc-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .doc-icon {
+            width: 40px;
+            height: 40px;
+            background: rgba(99, 102, 241, 0.1);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+        }
+
+        .doc-details p {
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .doc-details span {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+
+        .doc-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .action-icon-btn {
+            background: transparent;
+            border: 1px solid var(--card-border);
+            color: var(--text-secondary);
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all var(--transition-speed);
+        }
+
+        .action-icon-btn:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .action-icon-btn.delete-btn:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        /* Text Extractor Output Box */
+        .text-output-card {
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+        }
+
+        .text-output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .text-output-area {
+            flex: 1;
+            background: rgba(17, 24, 39, 0.8);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 1.25rem;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+
+        /* Toast Notifications */
+        #toast-container {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: rgba(17, 24, 39, 0.95);
+            border-left: 4px solid var(--primary);
+            border-top: 1px solid var(--card-border);
+            border-right: 1px solid var(--card-border);
+            border-bottom: 1px solid var(--card-border);
+            padding: 1rem 1.5rem;
+            border-radius: 0 10px 10px 0;
+            color: white;
+            font-size: 0.9rem;
+            font-weight: 500;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.35);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            min-width: 300px;
+            max-width: 450px;
+            pointer-events: auto;
+            backdrop-filter: blur(10px);
+            animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: all 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(120%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast.success { border-left-color: var(--success); }
+        .toast.warning { border-left-color: var(--warning); }
+        .toast.error { border-left-color: var(--danger); }
+
+        .toast-close {
+            margin-left: auto;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .toast-close:hover {
+            color: white;
+        }
+
+        /* Loader Animation */
+        .spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(11, 15, 25, 0.7);
+            border-radius: 16px;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 1rem;
+            backdrop-filter: blur(4px);
+            z-index: 10;
+        }
+
+        /* Modal for Context View */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(11, 15, 25, 0.85);
+            backdrop-filter: blur(8px);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            width: 100%;
+            max-width: 900px;
+            max-height: 80vh;
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+            animation: modalFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes modalFadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .modal-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--card-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .modal-footer {
+            padding: 1.25rem 1.5rem;
+            border-top: 1px solid var(--card-border);
+            display: flex;
+            justify-content: flex-end;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sidebar Navigation -->
+    <div class="sidebar">
+        <div class="brand">
+            <div class="brand-logo">L</div>
+            <span class="brand-name">Librarian</span>
+        </div>
+        
+        <div class="nav-menu">
+            <div class="nav-item active" data-tab="query-tab">
+                <svg viewBox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                Vector Search
+            </div>
+            <div class="nav-item" data-tab="documents-tab" id="nav-docs-trigger">
+                <svg viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                Manage Docs
+            </div>
+            <div class="nav-item" data-tab="extractor-tab">
+                <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h7"></path></svg>
+                Text Extractor
+            </div>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                <span>Mock Mode Active</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="main-container">
+        <header>
+            <div class="page-title">
+                <h1 id="panel-title">Vector Search</h1>
+                <p id="panel-desc">Retrieve semantically relevant chunks from your index.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; background: var(--card-bg); border: 1px solid var(--card-border); padding: 0.5rem 1rem; border-radius: 8px;">
+                <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); white-space: nowrap; margin-bottom: 0;">User ID:</label>
+                <input type="text" class="input-control" id="global-user-id" placeholder="public" style="width: 120px; padding: 0.25rem 0.5rem; font-size: 0.85rem; height: auto; margin-bottom: 0;">
+            </div>
+        </header>
+
+        <!-- Tab 1: Vector Search -->
+        <div class="tab-panel active" id="query-tab">
+            <div class="grid-sidebar-main">
+                <div class="card" style="height: fit-content;">
+                    <div class="card-header">
+                        <div class="card-title">Search Configuration</div>
+                    </div>
+                    <form id="search-form">
+                        <div class="form-group">
+                            <label>Search Type</label>
+                            <select class="input-control" id="search-type">
+                                <option value="single">Single File Search</option>
+                                <option value="multiple">Multi-File Search</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group" id="single-file-select-group">
+                            <label>Target File ID</label>
+                            <select class="input-control" id="search-file-id">
+                                <option value="">Select an indexed file...</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="multi-file-select-group" style="display: none;">
+                            <label>Target File IDs (Comma Separated)</label>
+                            <input type="text" class="input-control" id="search-file-ids" placeholder="e.g. file1, file2, file3">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Relevance Limit (k)</label>
+                            <div class="slider-container">
+                                <input type="range" id="search-k" min="1" max="20" value="4">
+                                <span class="slider-value" id="k-value">4</span>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Query String</label>
+                            <textarea class="input-control" id="search-query" placeholder="Type your query here to find matches..."></textarea>
+                        </div>
+
+                        <div style="display: flex; gap: 0.75rem; margin-top: 1rem;">
+                            <button type="submit" id="execute-search-btn" class="btn btn-primary" style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                                <svg viewBox="0 0 24 24" style="width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:2.5;"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                Vector Search
+                            </button>
+                            <button type="button" id="execute-ai-btn" class="btn" style="flex: 1; background: linear-gradient(135deg, #8b5cf6, #3b82f6); color: white; border: none; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2.5;width:18px;height:18px;"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 113.536 0V21h-7v-3.457z"></path></svg>
+                                Generate AI Answer
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card" style="position: relative;">
+                    <div class="loading-overlay" id="search-loader">
+                        <div class="spinner"></div>
+                        <p>Searching vectors...</p>
+                    </div>
+                    <div class="card-header">
+                        <div class="card-title">Query Results</div>
+                    </div>
+                    <div class="results-container" id="search-results">
+                        <div class="placeholder-text">Configure a query and file ID on the left to see semantic matching results.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 2: Document Management -->
+        <div class="tab-panel" id="documents-tab">
+            <div class="grid-sidebar-main">
+                <div class="card" style="height: fit-content; position: relative;">
+                    <div class="loading-overlay" id="upload-loader">
+                        <div class="spinner"></div>
+                        <p id="upload-progress-text">Processing document...</p>
+                    </div>
+                    <div class="card-header">
+                        <div class="card-title">Ingest Document</div>
+                    </div>
+                    
+                    <form id="ingest-upload-form">
+                        <div class="form-group">
+                            <label>File ID</label>
+                            <input type="text" class="input-control" id="upload-file-id" placeholder="Enter unique File ID (e.g. file-123)" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Entity/User ID (Optional)</label>
+                            <input type="text" class="input-control" id="upload-entity-id" placeholder="e.g. user_abc">
+                        </div>
+                        <div class="form-group">
+                            <label>File to Index</label>
+                            <div class="upload-zone">
+                                <svg viewBox="0 0 24 24"><path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                <p>Drag & Drop file here or click to browse</p>
+                                <span>Supports PDF, DOCX, CSV, MD, TXT, EPUB, XLSX</span>
+                                <input type="file" id="upload-file-input" required>
+                            </div>
+                            <div class="selected-file-badge" id="selected-file-badge">
+                                <span id="selected-file-name" style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 80%;">No file selected</span>
+                                <button type="button" id="clear-file" style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-weight:bold;">&times;</button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">Upload & Embed</button>
+                    </form>
+                </div>
+
+                <!-- Document List -->
+                <div class="card" style="position: relative;">
+                    <div class="loading-overlay" id="docs-loader">
+                        <div class="spinner"></div>
+                        <p>Loading indexed files...</p>
+                    </div>
+                    <div class="card-header">
+                        <div class="card-title">Indexed Documents</div>
+                    </div>
+                    <div class="results-container" id="documents-list">
+                        <div class="placeholder-text">No documents indexed yet. Use the upload panel on the left to index files.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab 3: Text Extractor -->
+        <div class="tab-panel" id="extractor-tab">
+            <div class="grid-sidebar-main">
+                <div class="card" style="height: fit-content; position: relative;">
+                    <div class="loading-overlay" id="extractor-loader">
+                        <div class="spinner"></div>
+                        <p>Extracting raw text...</p>
+                    </div>
+                    <div class="card-header">
+                        <div class="card-title">Extract Text</div>
+                    </div>
+                    <form id="extractor-form">
+                        <div class="form-group">
+                            <label>File ID</label>
+                            <input type="text" class="input-control" id="extract-file-id" placeholder="Temporary file ID identifier" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Select File</label>
+                            <div class="upload-zone">
+                                <svg viewBox="0 0 24 24"><path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                                <p>Drag & Drop file here or click to browse</p>
+                                <span>Runs text extraction without storing embeddings</span>
+                                <input type="file" id="extract-file-input" required>
+                            </div>
+                            <div class="selected-file-badge" id="extract-file-badge">
+                                <span id="extract-file-name" style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 80%;">No file selected</span>
+                                <button type="button" id="clear-extract-file" style="background:transparent; border:none; color:var(--text-muted); cursor:pointer; font-weight:bold;">&times;</button>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary" style="margin-top: 1rem;">Extract Text Content</button>
+                    </form>
+                </div>
+
+                <div class="card text-output-card">
+                    <div class="text-output-header">
+                        <div class="card-title">Extracted Text Output</div>
+                        <button class="btn btn-secondary" id="copy-text-btn" style="width: auto; padding: 0.5rem 1rem;" disabled>
+                            <svg viewBox="0 0 24 24" style="stroke:currentColor; fill:none; stroke-width:2; width:16px; height:16px;"><path d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m-2 4h5m0 0l-2-2m2 2l-2 2"></path></svg>
+                            Copy to Clipboard
+                        </button>
+                    </div>
+                    <div class="text-output-area" id="extracted-text-display">The extracted text will be displayed here in raw format.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Context Viewer Modal -->
+    <div class="modal" id="context-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="card-title" id="modal-doc-title">Document Context</div>
+                <button class="action-icon-btn" id="close-modal-btn" style="border: none; font-size: 1.5rem; line-height: 1;">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-doc-body" style="white-space: pre-wrap; font-family: var(--font-body); font-size: 0.95rem; line-height: 1.6; color: var(--text-primary);">
+                Loading context...
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="close-modal-footer-btn" style="width: auto;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container"></div>
+
+    <!-- JS Logic -->
+    <script>
+        // Tab Navigation
+        const navItems = document.querySelectorAll('.nav-item');
+        const tabPanels = document.querySelectorAll('.tab-panel');
+        const panelTitle = document.getElementById('panel-title');
+        const panelDesc = document.getElementById('panel-desc');
+
+        const tabMeta = {
+            'query-tab': { title: 'Vector Search', desc: 'Retrieve semantically relevant chunks from your index.' },
+            'documents-tab': { title: 'Manage Documents', desc: 'Ingest new files or manage existing document indices.' },
+            'extractor-tab': { title: 'Text Extractor', desc: 'Extract raw text contents of files without vector indexing.' }
+        };
+
+        navItems.forEach(item => {
+            item.addEventListener('click', () => {
+                const targetTab = item.getAttribute('data-tab');
+                
+                navItems.forEach(nav => nav.classList.remove('active'));
+                item.classList.add('active');
+
+                tabPanels.forEach(panel => panel.classList.remove('active'));
+                document.getElementById(targetTab).classList.add('active');
+
+                panelTitle.textContent = tabMeta[targetTab].title;
+                panelDesc.textContent = tabMeta[targetTab].desc;
+            });
+        });
+
+        // Toast Messages Helper
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            let icon = '';
+            if (type === 'success') icon = '<svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:var(--success);fill:none;stroke-width:2.5;"><path d="M5 13l4 4L19 7"></path></svg>';
+            if (type === 'error') icon = '<svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:var(--danger);fill:none;stroke-width:2.5;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>';
+            if (type === 'warning') icon = '<svg viewBox="0 0 24 24" style="width:20px;height:20px;stroke:var(--warning);fill:none;stroke-width:2.5;"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>';
+
+            toast.innerHTML = `
+                ${icon}
+                <span>${message}</span>
+                <button class="toast-close">&times;</button>
+            `;
+
+            container.appendChild(toast);
+
+            toast.querySelector('.toast-close').addEventListener('click', () => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => toast.remove(), 300);
+            });
+
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translateX(100%)';
+                    setTimeout(() => toast.remove(), 300);
+                }
+            }, 4000);
+        }
+
+        // Global state
+        let isMockMode = false;
+        let bearerToken = localStorage.getItem('bearer_token') || '';
+        
+        // Initialize Global User ID
+        const globalUserIdInput = document.getElementById('global-user-id');
+        let currentUserId = localStorage.getItem('global_user_id') || 'public';
+        globalUserIdInput.value = currentUserId;
+        
+        globalUserIdInput.addEventListener('change', () => {
+            currentUserId = globalUserIdInput.value.trim() || 'public';
+            globalUserIdInput.value = currentUserId;
+            localStorage.setItem('global_user_id', currentUserId);
+            document.getElementById('upload-entity-id').value = currentUserId === 'public' ? '' : currentUserId;
+            renderDocumentList();
+        });
+        
+        document.getElementById('upload-entity-id').value = currentUserId === 'public' ? '' : currentUserId;
+
+        // API request helper with auth token
+        async function apiRequest(url, options = {}) {
+            if (!options.headers) {
+                options.headers = {};
+            }
+            if (bearerToken) {
+                options.headers['Authorization'] = bearerToken.startsWith('Bearer ') ? bearerToken : `Bearer ${bearerToken}`;
+            }
+            
+            try {
+                let response = await fetch(url, options);
+                
+                // Handle unauthorized (401)
+                if (response.status === 401) {
+                    const token = prompt('API returned 401 Unauthorized. Please enter your Bearer Authorization token:');
+                    if (token) {
+                        bearerToken = token;
+                        localStorage.setItem('bearer_token', token);
+                        options.headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+                        response = await fetch(url, options);
+                    }
+                }
+                return response;
+            } catch (err) {
+                throw err;
+            }
+        }
+
+        // Auto-detect mode
+        async function detectMode() {
+            const dot = document.querySelector('.status-dot');
+            const text = document.querySelector('.status-badge span:last-child');
+            try {
+                const response = await apiRequest('/health');
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.status === 'UP') {
+                        isMockMode = false;
+                        dot.style.backgroundColor = 'var(--success)';
+                        dot.style.boxShadow = '0 0 10px var(--success)';
+                        text.textContent = 'API Connected (UP)';
+                        renderDocumentList();
+                        return;
+                    }
+                }
+            } catch (e) {
+                // connection error
+            }
+            isMockMode = false;
+            dot.style.backgroundColor = 'var(--danger)';
+            dot.style.boxShadow = '0 0 10px var(--danger)';
+            text.textContent = 'API Disconnected';
+            renderDocumentList();
+        }
+
+        // Mock Database in localStorage
+        const defaultDocs = [
+            {
+                id: 'annual-report-2025',
+                filename: 'Annual_Report_2025.pdf',
+                content: `Librarian RAG system is fully operational. Over the last fiscal year of 2025, our AI-assisted document searches have improved information discovery speeds by 80%. The system indexes PDF, CSV, DOCX, and Markdown formats. Google Gemini is utilized to compute embeddings, which are stored in PostgreSQL using the pgvector extension. Security is managed via signed JWT tokens.`,
+                chunks: [
+                    'Librarian RAG system is fully operational. Over the last fiscal year of 2025, our AI-assisted document searches have improved information discovery speeds by 80%.',
+                    'The system indexes PDF, CSV, DOCX, and Markdown formats. Google Gemini is utilized to compute embeddings, which are stored in PostgreSQL using the pgvector extension.'
+                ]
+            },
+            {
+                id: 'api-guide',
+                filename: 'api_developer_guide.md',
+                content: `FastAPI RAG endpoints support several ingestion actions. Use POST /embed to upload a document and index it in the pgvector database. Use POST /query to retrieve semantic matches for a specific file ID. In addition, POST /query_multiple can fetch results across a list of file IDs. The DELETE /documents endpoint allows removing documents by their identifiers.`,
+                chunks: [
+                    'FastAPI RAG endpoints support several ingestion actions. Use POST /embed to upload a document and index it in the pgvector database.',
+                    'Use POST /query to retrieve semantic matches for a specific file ID. In addition, POST /query_multiple can fetch results across a list of file IDs.',
+                    'The DELETE /documents endpoint allows removing documents by their identifiers.'
+                ]
+            }
+        ];
+
+        function getMockDb() {
+            const db = localStorage.getItem('librarian_mock_db');
+            if (!db) {
+                localStorage.setItem('librarian_mock_db', JSON.stringify(defaultDocs));
+                return defaultDocs;
+            }
+            return JSON.parse(db);
+        }
+
+        function saveMockDb(db) {
+            localStorage.setItem('librarian_mock_db', JSON.stringify(db));
+        }
+
+        // Slider value display
+        const searchK = document.getElementById('search-k');
+        const kValue = document.getElementById('k-value');
+        searchK.addEventListener('input', () => {
+            kValue.textContent = searchK.value;
+        });
+
+        // File upload visual badges
+        const fileInput = document.getElementById('upload-file-input');
+        const selectedFileBadge = document.getElementById('selected-file-badge');
+        const selectedFileName = document.getElementById('selected-file-name');
+        const clearFile = document.getElementById('clear-file');
+        const uploadFileId = document.getElementById('upload-file-id');
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                const file = e.target.files[0];
+                selectedFileName.textContent = file.name;
+                selectedFileBadge.style.display = 'flex';
+                if (!uploadFileId.value) {
+                    uploadFileId.value = 'file-' + file.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+                }
+            }
+        });
+
+        clearFile.addEventListener('click', () => {
+            fileInput.value = '';
+            selectedFileBadge.style.display = 'none';
+        });
+
+        // Text Extractor upload badge
+        const extractInput = document.getElementById('extract-file-input');
+        const extractBadge = document.getElementById('extract-file-badge');
+        const extractFileName = document.getElementById('extract-file-name');
+        const clearExtractFile = document.getElementById('clear-extract-file');
+        const extractFileId = document.getElementById('extract-file-id');
+
+        extractInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                const file = e.target.files[0];
+                extractFileName.textContent = file.name;
+                extractBadge.style.display = 'flex';
+                if (!extractFileId.value) {
+                    extractFileId.value = 'ext-' + Math.floor(Math.random() * 1000);
+                }
+            }
+        });
+
+        clearExtractFile.addEventListener('click', () => {
+            extractInput.value = '';
+            extractBadge.style.display = 'none';
+        });
+
+        // Populate document list and selectors
+        async function renderDocumentList() {
+            const listContainer = document.getElementById('documents-list');
+            const selectDropdown = document.getElementById('search-file-id');
+            const docsLoader = document.getElementById('docs-loader');
+
+            // 1. Mock Mode rendering
+            if (isMockMode) {
+                const db = getMockDb();
+                listContainer.innerHTML = '';
+                selectDropdown.innerHTML = '<option value="">Select an indexed file...</option>';
+
+                if (db.length === 0) {
+                    listContainer.innerHTML = '<div class="placeholder-text">No documents indexed yet. Use the upload panel on the left to index files.</div>';
+                    return;
+                }
+
+                db.forEach(doc => {
+                    const option = document.createElement('option');
+                    option.value = doc.id;
+                    option.textContent = doc.id;
+                    selectDropdown.appendChild(option);
+
+                    const item = document.createElement('div');
+                    item.className = 'doc-item';
+                    item.innerHTML = `
+                        <div class="doc-info">
+                            <div class="doc-icon">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;width:20px;height:20px;"><path d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <div class="doc-details">
+                                <p>${doc.id}</p>
+                                <span>${doc.filename} (${doc.chunks.length} chunks)</span>
+                            </div>
+                        </div>
+                        <div class="doc-actions">
+                            <button class="action-icon-btn view-btn" data-id="${doc.id}" title="View content/context">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;width:16px;height:16px;"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            </button>
+                            <button class="action-icon-btn delete-btn" data-id="${doc.id}" title="Delete document">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;width:16px;height:16px;"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+                attachActionListeners();
+                return;
+            }
+
+            // 2. Real API Mode rendering
+            docsLoader.style.display = 'flex';
+            try {
+                const response = await apiRequest(`/ids?entity_id=${encodeURIComponent(currentUserId)}`);
+                if (!response.ok) {
+                    throw new Error('Failed to fetch document IDs');
+                }
+                const ids = await response.json();
+                
+                listContainer.innerHTML = '';
+                selectDropdown.innerHTML = '<option value="">Select an indexed file...</option>';
+
+                if (ids.length === 0) {
+                    listContainer.innerHTML = '<div class="placeholder-text">No documents indexed yet. Use the upload panel on the left to index files.</div>';
+                    return;
+                }
+
+                ids.forEach(id => {
+                    const option = document.createElement('option');
+                    option.value = id;
+                    option.textContent = id;
+                    selectDropdown.appendChild(option);
+
+                    const item = document.createElement('div');
+                    item.className = 'doc-item';
+                    item.innerHTML = `
+                        <div class="doc-info">
+                            <div class="doc-icon">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;width:20px;height:20px;"><path d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                            </div>
+                            <div class="doc-details">
+                                <p>${id}</p>
+                                <span>pgvector stored index</span>
+                            </div>
+                        </div>
+                        <div class="doc-actions">
+                            <button class="action-icon-btn view-btn" data-id="${id}" title="View content/context">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;width:16px;height:16px;"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            </button>
+                            <button class="action-icon-btn delete-btn" data-id="${id}" title="Delete document">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2;width:16px;height:16px;"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
+                    `;
+                    listContainer.appendChild(item);
+                });
+                attachActionListeners();
+            } catch (err) {
+                showToast(err.message, 'error');
+                listContainer.innerHTML = '<div class="placeholder-text" style="color:var(--danger)">Error loading documents. Verify API connection.</div>';
+            } finally {
+                docsLoader.style.display = 'none';
+            }
+        }
+
+        function attachActionListeners() {
+            document.querySelectorAll('.view-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const targetId = btn.getAttribute('data-id');
+                    openContextModal(targetId);
+                });
+            });
+
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const targetId = btn.getAttribute('data-id');
+                    deleteDocument(targetId);
+                });
+            });
+        }
+
+        // Delete document call
+        async function deleteDocument(docId) {
+            if (!confirm(`Are you sure you want to delete file_id "${docId}"?`)) {
+                return;
+            }
+
+            if (isMockMode) {
+                let db = getMockDb();
+                db = db.filter(doc => doc.id !== docId);
+                saveMockDb(db);
+                showToast(`Document "${docId}" deleted successfully.`);
+                renderDocumentList();
+                return;
+            }
+
+            try {
+                const response = await apiRequest(`/documents?entity_id=${encodeURIComponent(currentUserId)}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify([docId])
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    showToast(result.message || 'Document deleted successfully.');
+                    renderDocumentList();
+                } else {
+                    throw new Error(result.detail || 'Delete operation failed.');
+                }
+            } catch (err) {
+                showToast(err.message, 'error');
+            }
+        }
+
+        // Open context modal
+        const modal = document.getElementById('context-modal');
+        const modalTitle = document.getElementById('modal-doc-title');
+        const modalBody = document.getElementById('modal-doc-body');
+
+        async function openContextModal(docId) {
+            modalTitle.textContent = `Document Context: ${docId}`;
+            modal.classList.add('active');
+            modalBody.textContent = 'Loading context...';
+
+            if (isMockMode) {
+                const db = getMockDb();
+                const doc = db.find(d => d.id === docId);
+                modalBody.textContent = doc ? doc.content : 'Document not found.';
+                return;
+            }
+
+            try {
+                const response = await apiRequest(`/documents/${encodeURIComponent(docId)}/context`);
+                if (!response.ok) {
+                    throw new Error('Failed to load document content');
+                }
+                const content = await response.text();
+                modalBody.textContent = content || '(Context is empty)';
+            } catch (err) {
+                modalBody.innerHTML = `<span style="color:var(--danger)">Error loading context: ${err.message}</span>`;
+            }
+        }
+
+        document.getElementById('close-modal-btn').addEventListener('click', () => modal.classList.remove('active'));
+        document.getElementById('close-modal-footer-btn').addEventListener('click', () => modal.classList.remove('active'));
+
+        // Handle Search Type dropdown
+        const searchType = document.getElementById('search-type');
+        const singleFileGroup = document.getElementById('single-file-select-group');
+        const multiFileGroup = document.getElementById('multi-file-select-group');
+
+        searchType.addEventListener('change', () => {
+            if (searchType.value === 'single') {
+                singleFileGroup.style.display = 'block';
+                multiFileGroup.style.display = 'none';
+            } else {
+                singleFileGroup.style.display = 'none';
+                multiFileGroup.style.display = 'block';
+            }
+        });
+
+        let isAiRequested = false;
+        
+        document.getElementById('execute-ai-btn').addEventListener('click', () => {
+            isAiRequested = true;
+            document.getElementById('search-form').dispatchEvent(new Event('submit'));
+        });
+
+        // Search query execution
+        document.getElementById('search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const queryVal = document.getElementById('search-query').value.trim();
+            const type = searchType.value;
+            const k = parseInt(searchK.value);
+            const resultsContainer = document.getElementById('search-results');
+            const searchLoader = document.getElementById('search-loader');
+            
+            const generateAnswer = isAiRequested;
+            isAiRequested = false;
+
+            if (!queryVal) {
+                showToast('Please type a search query first', 'warning');
+                return;
+            }
+
+            searchLoader.style.display = 'flex';
+
+            // Mock Mode search
+            if (isMockMode) {
+                setTimeout(() => {
+                    const db = getMockDb();
+                    let targetDocs = [];
+
+                    if (type === 'single') {
+                        const fileId = document.getElementById('search-file-id').value;
+                        if (!fileId) {
+                            showToast('Please select a target File ID', 'warning');
+                            searchLoader.style.display = 'none';
+                            return;
+                        }
+                        const doc = db.find(d => d.id === fileId);
+                        if (doc) targetDocs.push(doc);
+                    } else {
+                        const fileIdsStr = document.getElementById('search-file-ids').value.trim();
+                        if (!fileIdsStr) {
+                            showToast('Please specify target file IDs', 'warning');
+                            searchLoader.style.display = 'none';
+                            return;
+                        }
+                        const fileIds = fileIdsStr.split(',').map(s => s.trim()).filter(Boolean);
+                        targetDocs = db.filter(doc => fileIds.includes(doc.id));
+                    }
+
+                    resultsContainer.innerHTML = '';
+                    let matchingChunks = [];
+
+                    targetDocs.forEach(doc => {
+                        doc.chunks.forEach((chunk, index) => {
+                            let score = 0.5 + Math.random() * 0.4;
+                            const queryWords = queryVal.toLowerCase().split(' ');
+                            let hits = 0;
+                            queryWords.forEach(word => {
+                                if (chunk.toLowerCase().includes(word)) hits++;
+                            });
+                            
+                            if (hits > 0) {
+                                score = Math.min(0.99, score + (hits / queryWords.length) * 0.3);
+                                matchingChunks.push({
+                                    file_id: doc.id,
+                                    page: index,
+                                    text: chunk,
+                                    score: score
+                                });
+                            }
+                        });
+                    });
+
+                    matchingChunks.sort((a, b) => b.score - a.score);
+                    matchingChunks = matchingChunks.slice(0, k);
+
+                    if (matchingChunks.length === 0) {
+                        resultsContainer.innerHTML = '<div class="placeholder-text">No matches found for the given query. Try adding words matching the index context.</div>';
+                        searchLoader.style.display = 'none';
+                        return;
+                    }
+
+                    matchingChunks.forEach(res => {
+                        const percent = Math.round(res.score * 100);
+                        const resultCard = document.createElement('div');
+                        resultCard.className = 'result-item';
+                        resultCard.innerHTML = `
+                            <div class="result-header">
+                                <div class="result-meta">
+                                    <span class="result-badge">${res.file_id}</span>
+                                    <span style="color:var(--text-muted)">|</span>
+                                    <span>Chunk ${res.page + 1}</span>
+                                </div>
+                                <div class="result-score">
+                                    <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2.5;width:14px;height:14px;"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                    <span>${percent}% relevance</span>
+                                </div>
+                            </div>
+                            <div class="result-content">${res.text}</div>
+                        `;
+                        resultsContainer.appendChild(resultCard);
+                    });
+
+                    searchLoader.style.display = 'none';
+                }, 600);
+                return;
+            }
+
+            // API Mode search
+            try {
+                let response;
+                if (type === 'single') {
+                    const fileId = document.getElementById('search-file-id').value;
+                    if (!fileId) {
+                        showToast('Please select a target File ID', 'warning');
+                        searchLoader.style.display = 'none';
+                        return;
+                    }
+                    response = await apiRequest('/query', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            query: queryVal, 
+                            file_id: fileId, 
+                            k: k,
+                            entity_id: currentUserId,
+                            generate_answer: generateAnswer
+                        })
+                    });
+                } else {
+                    const fileIdsStr = document.getElementById('search-file-ids').value.trim();
+                    if (!fileIdsStr) {
+                        showToast('Please specify target file IDs separated by commas', 'warning');
+                        searchLoader.style.display = 'none';
+                        return;
+                    }
+                    const fileIds = fileIdsStr.split(',').map(s => s.trim()).filter(Boolean);
+                    response = await apiRequest('/query_multiple', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            query: queryVal, 
+                            file_ids: fileIds, 
+                            k: k,
+                            entity_id: currentUserId,
+                            generate_answer: generateAnswer
+                        })
+                    });
+                }
+
+                if (!response.ok) {
+                    const errRes = await response.json();
+                    throw new Error(errRes.detail || 'Search query failed');
+                }
+
+                const resultsData = await response.json();
+                resultsContainer.innerHTML = '';
+
+                let documents = [];
+                let aiAnswer = null;
+
+                if (resultsData && !Array.isArray(resultsData) && 'documents' in resultsData) {
+                    documents = resultsData.documents;
+                    aiAnswer = resultsData.answer;
+                } else {
+                    documents = resultsData || [];
+                }
+
+                if (aiAnswer) {
+                    const answerCard = document.createElement('div');
+                    answerCard.className = 'ai-answer-card';
+                    answerCard.style.cssText = 'background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 12px; padding: 1.25rem; margin-bottom: 1.5rem; position: relative; backdrop-filter: blur(10px);';
+                    answerCard.innerHTML = `
+                        <div style="display:flex; align-items:center; gap:6px; color:#c084fc; font-weight:600; font-size:0.95rem; margin-bottom:0.75rem;">
+                            <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2.5;width:18px;height:18px;"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 113.536 0V21h-7v-3.457z"></path></svg>
+                            AI Generated Answer
+                        </div>
+                        <div style="color:var(--text-main); font-size:1rem; line-height:1.6; white-space: pre-wrap;">${aiAnswer}</div>
+                    `;
+                    resultsContainer.appendChild(answerCard);
+                    
+                    const sourceTitle = document.createElement('div');
+                    sourceTitle.style.cssText = 'font-size:0.85rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.75rem; letter-spacing:0.05em;';
+                    sourceTitle.textContent = "Source Documents (Retrieved Context)";
+                    resultsContainer.appendChild(sourceTitle);
+                }
+
+                if (documents.length === 0) {
+                    if (!aiAnswer) {
+                        resultsContainer.innerHTML = '<div class="placeholder-text">No matches found for the given query. Try adjusting parameters.</div>';
+                    }
+                    return;
+                }
+
+                documents.forEach(res => {
+                    const docObj = res[0];
+                    const score = res[1];
+                    const meta = docObj.metadata || {};
+                    const pageNumber = meta.page !== undefined ? `Page ${meta.page + 1}` : 'Chunk';
+                    const percent = Math.round((1 - score) * 100);
+                    const similarityText = score !== undefined ? `${percent}% similarity` : '';
+
+                    const resultCard = document.createElement('div');
+                    resultCard.className = 'result-item';
+                    resultCard.innerHTML = `
+                        <div class="result-header">
+                            <div class="result-meta">
+                                <span class="result-badge">${meta.file_id || 'unknown'}</span>
+                                <span style="color:var(--text-muted)">|</span>
+                                <span>${pageNumber}</span>
+                            </div>
+                            <div class="result-score">
+                                <svg viewBox="0 0 24 24" style="stroke:currentColor;fill:none;stroke-width:2.5;width:14px;height:14px;"><path d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                                <span>${similarityText}</span>
+                            </div>
+                        </div>
+                        <div class="result-content">${docObj.page_content}</div>
+                    `;
+                    resultsContainer.appendChild(resultCard);
+                });
+            } catch (err) {
+                showToast(err.message, 'error');
+                resultsContainer.innerHTML = `<div class="placeholder-text" style="color:var(--danger)">Query search failed: ${err.message}</div>`;
+            } finally {
+                searchLoader.style.display = 'none';
+            }
+        });
+
+        // Ingest Document upload submit
+        document.getElementById('ingest-upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileId = uploadFileId.value.trim();
+            const entityId = document.getElementById('upload-entity-id').value.trim();
+            const file = fileInput.files[0];
+            const uploadLoader = document.getElementById('upload-loader');
+            const progressText = document.getElementById('upload-progress-text');
+
+            if (!file) {
+                showToast('Please select a file to upload.', 'warning');
+                return;
+            }
+
+            // Mock Mode ingestion
+            if (isMockMode) {
+                uploadLoader.style.display = 'flex';
+                progressText.textContent = 'Simulating index...';
+                
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    setTimeout(() => {
+                        const text = evt.target.result;
+                        const sentenceRegex = /[^.!?]+[.!?]+/g;
+                        const sentences = text.match(sentenceRegex) || [text];
+                        
+                        const chunks = [];
+                        let currentChunk = '';
+                        sentences.forEach(sentence => {
+                            if ((currentChunk + sentence).length > 250) {
+                                chunks.push(currentChunk.trim());
+                                currentChunk = sentence;
+                            } else {
+                                currentChunk += ' ' + sentence;
+                            }
+                        });
+                        if (currentChunk.trim()) {
+                            chunks.push(currentChunk.trim());
+                        }
+
+                        const db = getMockDb();
+                        const cleanDb = db.filter(doc => doc.id !== fileId);
+                        cleanDb.push({
+                            id: fileId,
+                            filename: file.name,
+                            content: text,
+                            chunks: chunks
+                        });
+                        saveMockDb(cleanDb);
+
+                        showToast(`File "${file.name}" indexed in memory!`);
+                        
+                        fileInput.value = '';
+                        selectedFileBadge.style.display = 'none';
+                        uploadFileId.value = '';
+                        document.getElementById('upload-entity-id').value = '';
+
+                        uploadLoader.style.display = 'none';
+                        renderDocumentList();
+                    }, 800);
+                };
+                reader.readAsText(file);
+                return;
+            }
+
+            // API Mode ingestion
+            const formData = new FormData();
+            formData.append('file_id', fileId);
+            formData.append('file', file);
+            if (entityId) formData.append('entity_id', entityId);
+
+            uploadLoader.style.display = 'flex';
+            progressText.textContent = 'Uploading & indexing file...';
+
+            try {
+                const response = await apiRequest('/embed', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                if (response.ok && result.status) {
+                    showToast(`File "${file.name}" uploaded and indexed successfully!`);
+                    
+                    fileInput.value = '';
+                    selectedFileBadge.style.display = 'none';
+                    uploadFileId.value = '';
+                    document.getElementById('upload-entity-id').value = '';
+                    
+                    renderDocumentList();
+                } else {
+                    throw new Error(result.message || 'File processing failed');
+                }
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                uploadLoader.style.display = 'none';
+            }
+        });
+
+        // Text Extractor Form submit
+        document.getElementById('extractor-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const file = extractInput.files[0];
+            const loader = document.getElementById('extractor-loader');
+            const outputDisplay = document.getElementById('extracted-text-display');
+            const copyBtn = document.getElementById('copy-text-btn');
+
+            if (!file) {
+                showToast('Please select a file.', 'warning');
+                return;
+            }
+
+            loader.style.display = 'flex';
+            outputDisplay.textContent = 'Extracting content...';
+            copyBtn.disabled = true;
+
+            // Mock Mode extraction
+            if (isMockMode) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    setTimeout(() => {
+                        outputDisplay.textContent = evt.target.result || '(File is empty)';
+                        copyBtn.disabled = false;
+                        showToast('Raw text extracted successfully!');
+                        
+                        extractInput.value = '';
+                        extractBadge.style.display = 'none';
+                        extractFileId.value = '';
+                        loader.style.display = 'none';
+                    }, 700);
+                };
+                reader.readAsText(file);
+                return;
+            }
+
+            // API Mode extraction
+            const formData = new FormData();
+            formData.append('file_id', extractFileId.value.trim() || 'temp_ext');
+            formData.append('file', file);
+
+            try {
+                const response = await apiRequest('/text', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                if (response.ok) {
+                    outputDisplay.textContent = result.text || '(No text extracted from file)';
+                    copyBtn.disabled = false;
+                    showToast('Text extracted successfully!');
+                    
+                    extractInput.value = '';
+                    extractBadge.style.display = 'none';
+                    extractFileId.value = '';
+                } else {
+                    throw new Error(result.detail || 'Text extraction failed');
+                }
+            } catch (err) {
+                showToast(err.message, 'error');
+                outputDisplay.textContent = `Error during extraction: ${err.message}`;
+            } finally {
+                loader.style.display = 'none';
+            }
+        });
+
+        // Copy Text output to Clipboard
+        document.getElementById('copy-text-btn').addEventListener('click', () => {
+            const text = document.getElementById('extracted-text-display').textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard!');
+            }).catch(err => {
+                showToast('Failed to copy', 'error');
+            });
+        });
+
+        // Initialize UI
+        document.getElementById('nav-docs-trigger').addEventListener('click', renderDocumentList);
+        detectMode();
+        // Check health periodically
+        setInterval(detectMode, 10000);
+    </script>
+</body>
+</html>
