@@ -1,15 +1,14 @@
-# app/utils/document_loader.py
+# ID-Rag/app/utils/document_loader.py
 
 import os
 import codecs
 import tempfile
-
 from typing import Iterator, List, Optional
 import chardet
 
 from langchain_core.documents import Document
 
-from app.config import known_source_ext, CHUNK_OVERLAP, logger
+from app.config import CHUNK_OVERLAP, logger
 from langchain_community.document_loaders import (
     TextLoader,
     PyPDFLoader,
@@ -23,6 +22,11 @@ from langchain_community.document_loaders import (
     UnstructuredPowerPointLoader,
 )
 
+known_source_ext = [
+    "go", "py", "java", "sh", "bat", "ps1", "cmd", "js", "ts", "css", "cpp", "hpp", "h", "c", "cs", "sql", "log", "ini",
+    "pl", "pm", "r", "dart", "dockerfile", "env", "php", "hs", "hsc", "lua", "nginxconf", "conf", "m", "mm", "plsql",
+    "perl", "rb", "rs", "db2", "scala", "bash", "swift", "vue", "svelte", "yml", "yaml", "eml", "ex", "exs", "erl", "tsx", "jsx", "lhs"
+]
 
 # Extensions that identify binary file formats handled by dedicated loaders.
 # Used to prevent a conflicting multipart Content-Type (e.g. ``text/markdown``)
@@ -68,7 +72,6 @@ class SafePyPDFLoader:
     def load(self) -> List[Document]:
         """Load PDF documents with automatic fallback on image extraction errors."""
         return list(self.lazy_load())
-
 
 
 def detect_file_encoding(filepath: str) -> str:
@@ -121,7 +124,7 @@ def get_loader(
     filepath: str,
     raw_text: bool = False,
 ):
-    """Get the appropriate document loader based on file type and\or content type.
+    """Get the appropriate document loader based on file type and/or content type.
 
     When ``raw_text`` is True, text-formatted files (e.g. Markdown) are loaded
     verbatim with :class:`TextLoader` so their original formatting is
