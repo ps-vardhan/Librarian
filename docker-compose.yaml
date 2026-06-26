@@ -6,14 +6,13 @@ services:
       POSTGRES_USER: myuser
       POSTGRES_PASSWORD: mypassword
     volumes:
-      - pgdata2:/var/lib/postgresql/data
+      - pgdata_idrag:/var/lib/postgresql/data
     ports:
       - "5433:5432"
 
   fastapi:
     build: .
     ports:
-
       - "8000:8000"
     volumes:
       - ./uploads:/app/uploads
@@ -21,6 +20,9 @@ services:
       - db
     env_file:
       - .env
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
 
 volumes:
-  pgdata2:
+  pgdata_idrag:
