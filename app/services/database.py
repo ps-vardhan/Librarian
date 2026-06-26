@@ -1,4 +1,4 @@
-# app/services/database.py
+# ID-Rag/app/services/database.py
 import asyncpg
 from app.config import DSN, logger
 
@@ -31,7 +31,6 @@ async def ensure_vector_indexes():
     """
     table_name = "langchain_pg_embedding"
     column_name = "custom_id"
-    # You might want to standardize the index naming convention
     index_name = f"idx_{table_name}_{column_name}"
 
     pool = await PSQLDatabase.get_pool()
@@ -39,23 +38,18 @@ async def ensure_vector_indexes():
         await conn.execute(
             f"""
             CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} ({column_name});
-        """
+            """
         )
 
-        # Expression index for (cmetadata->>'file_id') — critical for query
-        # performance. ExtendedPgVector overrides LangChain's default
-        # jsonb_path_match() to emit cmetadata->>'file_id' = ... which uses
-        # this B-tree index for fast equality lookups.
+        # Expression index for (cmetadata->>'file_id') — critical for query performance.
         await conn.execute(
             f"""
             CREATE INDEX IF NOT EXISTS idx_{table_name}_file_id
             ON {table_name} ((cmetadata->>'file_id'));
-        """
+            """
         )
 
         # Migrate cmetadata from JSON to JSONB (idempotent — skipped if already JSONB).
-        # Rollback: ALTER TABLE langchain_pg_embedding ALTER COLUMN cmetadata TYPE JSON USING cmetadata::json;
-        # NOTE: table name is hardcoded below (not interpolated) to avoid SQL injection.
         await conn.execute(
             """
             DO $$
@@ -85,7 +79,7 @@ async def ensure_vector_indexes():
             """
         )
 
-        logger.info("Vector database indexes ensured")
+        logger.info("Vector database indexes ensured successfully in ID-Rag")
 
 
 async def pg_health_check() -> bool:
@@ -95,5 +89,5 @@ async def pg_health_check() -> bool:
             await conn.fetchval("SELECT 1")
         return True
     except Exception as e:
-        logger.error(f"Health check failed: {e}")
+        logger.error(f"PostgreSQL health check failed in ID-Rag: {e}")
         return False
